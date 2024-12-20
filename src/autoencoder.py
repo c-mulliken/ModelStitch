@@ -3,7 +3,9 @@
 import torch.nn as nn
 import torch
 from torch.utils.data import DataLoader
-from torchinfo import summary
+from sklearn.decomposition import PCA
+import numpy as np
+import matplotlib.pyplot as plt
 
 class Autoencoder(nn.Module):
     def __init__(self, 
@@ -16,6 +18,8 @@ class Autoencoder(nn.Module):
 
         encode_layers = []
         decode_layers = []
+
+        self.latent_dim = latent_dim
 
         for i, neuron_count in enumerate(encode_neurons):
             if i == 0:
@@ -55,5 +59,32 @@ class Autoencoder(nn.Module):
         self.encode = nn.Sequential(*encode_layers)
         self.decode = nn.Sequential(*decode_layers)
         
-    def forward(self, x):
+    def forward(self,
+                x: torch.Tensor):
         self.decode(self.encode(x))
+
+    def viz_latent_space(self, loader: DataLoader):
+        self.eval()
+        outs = []
+        labels = []
+        if self.latent_dim == 2:
+            for (input, label) in loader:
+                out = self.encode(input.view(input.size(0), -1))
+                outs.append(out.detach().numpy())
+                labels.append(label.detach().numpy())
+        elif self.latent_dim > 2:
+            print(f'Latent space dim {self.latent_dim} > 2, using PCA.')
+            for (input, label) in loader:
+                out = self.encode(input.view(input.size(0), -1))
+                outs.append(out.detach().numpy())
+                labels.append(label.detach().numpy())
+            pca = PCA(n_components=2)
+            outs = pca.fit_transform(outs)
+        outs.concatenate(outs, axis = 0)
+        labels.concatenate(labels, axis = 0)
+        fig, ax = plt.subplots(figsize=(10, 10))
+        ax.scatter(outs[:, 0], outs[:, 1], c = labels)
+        ax.legend()
+
+ae = Autoencoder(5, 2, [5, 5, 5])
+t = torch.tensor([1., 2., 3., 4., 5.], dtype=torch.float32)
