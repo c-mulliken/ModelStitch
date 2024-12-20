@@ -2,7 +2,8 @@
 
 import torch.nn as nn
 import torch
-from torch.utils.data import DataLoader
+import torch.optim as optim
+from torch.utils.data import DataLoader, Dataset
 from sklearn.decomposition import PCA
 import numpy as np
 import matplotlib.pyplot as plt
@@ -12,8 +13,8 @@ class Autoencoder(nn.Module):
                  in_dim: int,
                  latent_dim: int,
                  encode_neurons: list,
-                 decode_neurons: list = None
-                 ):
+                 decode_neurons: list = None,
+                 batch_norm: bool = True):
         super().__init__()
 
         encode_layers = []
@@ -27,6 +28,7 @@ class Autoencoder(nn.Module):
                 encode_layers.append(nn.ReLU())
             elif i == (len(encode_neurons) - 1):
                 encode_layers.append(nn.Linear(neuron_count, latent_dim))
+                if batch_norm: encode_layers.append(nn.BatchNorm1d(latent_dim))
             else:
                 encode_layers.append(nn.Linear(encode_neurons[i - 1],
                                                neuron_count))
@@ -61,30 +63,63 @@ class Autoencoder(nn.Module):
         
     def forward(self,
                 x: torch.Tensor):
-        self.decode(self.encode(x))
+        return self.decode(self.encode(x))
 
     def viz_latent_space(self, loader: DataLoader):
         self.eval()
-        outs = []
+        latent_space = []
         labels = []
-        if self.latent_dim == 2:
-            for (input, label) in loader:
-                out = self.encode(input.view(input.size(0), -1))
-                outs.append(out.detach().numpy())
-                labels.append(label.detach().numpy())
-        elif self.latent_dim > 2:
+        for (input, label) in loader:
+            input = input.view(input.size(0), -1)
+            output = self.encode(input)
+            latent_space.append(output.detach().numpy())
+            labels.append(label.detach().numpy())
+        latent_space = np.concatenate(latent_space, axis = 0)
+        labels = np.concatenate(labels, axis = 0)
+        if self.latent_dim > 2:
             print(f'Latent space dim {self.latent_dim} > 2, using PCA.')
-            for (input, label) in loader:
-                out = self.encode(input.view(input.size(0), -1))
-                outs.append(out.detach().numpy())
-                labels.append(label.detach().numpy())
             pca = PCA(n_components=2)
-            outs = pca.fit_transform(outs)
-        outs.concatenate(outs, axis = 0)
-        labels.concatenate(labels, axis = 0)
+            latent_space = pca.fit_transform(latent_space)
         fig, ax = plt.subplots(figsize=(10, 10))
-        ax.scatter(outs[:, 0], outs[:, 1], c = labels)
+        ax.scatter(latent_space[:, 0], latent_space[:, 1], c = labels)
         ax.legend()
 
-ae = Autoencoder(5, 2, [5, 5, 5])
-t = torch.tensor([1., 2., 3., 4., 5.], dtype=torch.float32)
+    def train_now(self, data: Dataset, batch_size: int = 32,
+              epochs: int = 1, lr: float = 0.01,
+              optimizer: optim.Optimizer = optim.Adam, 
+              criterion: nn.Module = nn.MSELoss(),
+              print_loss: bool = True):
+        self.train()
+        loader = DataLoader(data, batch_size=batch_size, shuffle=True)
+        optimizer = optimizer(self.parameters(), lr=lr)
+        for epoch in range(epochs):
+            running_loss = 0.
+            for (input, _) in loader:
+                input = input.view(input.size(0), -1)
+                pred = self(input)
+                loss = criterion(input, pred)
+
+                optimizer.zero_grad()
+                loss.backward()
+                optimizer.step()
+
+                running_loss += loss.item()
+            if print_loss: print(f'Epoch: {epoch} | Loss: {running_loss}')
+
+    def test_loss(self, data: Dataset, batch_size: int = 32,
+                 criterion: nn.Module = nn.MSELoss(),
+                 print_loss: bool = True):
+        self.eval()
+        loader = DataLoader(data, batch_size=batch_size, shuffle=False)
+        total_loss = 0.
+        for (input, _) in loader:
+            input = input.view(input.size(0), -1)
+            pred = self(input)
+            loss = criterion(input, pred)
+            total_loss += loss.item()
+        if print_loss: print(f'Test Loss: {total_loss}.')
+        return total_loss
+    
+    def relative_representation(self, data: Dataset,
+                                anchors: torch.Tensor):
+        return data
