@@ -1,4 +1,4 @@
-# model-stitch
+# modelsym
 A Python library for model stitching and relative representations.
 
 ## Summary
